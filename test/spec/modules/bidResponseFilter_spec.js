@@ -35,7 +35,7 @@ describe('bidResponseFilter', () => {
 
     it('should not run if not configured', () => {
       reset();
-      addBidResponse.call({dispatch}, 'au', {}, reject);
+      addBidResponse.call({ dispatch }, 'au', {}, reject);
       sinon.assert.notCalled(reject);
       sinon.assert.called(dispatch);
     });
@@ -44,7 +44,7 @@ describe('bidResponseFilter', () => {
       config.setConfig({
         bidResponseFilter: {}
       });
-      addBidResponse.call({dispatch}, 'au', {}, reject);
+      addBidResponse.call({ dispatch }, 'au', {}, reject);
       sinon.assert.called(reject);
       sinon.assert.notCalled(dispatch);
     })
@@ -271,7 +271,7 @@ describe('bidResponseFilter', () => {
       badv: ['domain2.com'], bcat: ['BANNED_CAT1', 'BANNED_CAT2']
     });
 
-    config.setConfig({[MODULE_NAME]: {cat: {enforce: false}}});
+    config.setConfig({ [MODULE_NAME]: { cat: { enforce: false } } });
 
     addBidResponseHook(call, 'adcode', bid, () => {
     }, mockAuctionIndex);
@@ -301,7 +301,7 @@ describe('bidResponseFilter', () => {
       ortb2Imp: {}
     })
 
-    config.setConfig({[MODULE_NAME]: {cat: {blockUnknown: false}}});
+    config.setConfig({ [MODULE_NAME]: { cat: { blockUnknown: false } } });
 
     addBidResponseHook(call, 'adcode', bid, () => {
     }, mockAuctionIndex);
@@ -343,5 +343,73 @@ describe('bidResponseFilter', () => {
 
     addBidResponseHook(call, 'adcode', bid, reject, mockAuctionIndex);
     sinon.assert.calledWith(reject, BID_MEDIA_TYPE_REJECTION_REASON);
+  });
+
+  it('should preserve default behavior for banner IBV bids on multi-format ad units', () => {
+    const reject = sinon.stub();
+    const call = sinon.stub();
+    const bid = {
+      meta: {
+        advertiserDomains: ['validdomain1.com'],
+        primaryCatId: 'VALID_CAT',
+        attr: 6,
+        mediaType: 'banner',
+        cattax: 1
+      },
+      mediaType: 'banner'
+    };
+
+    mockAuctionIndex.getOrtb2 = () => ({
+      badv: [], bcat: []
+    });
+
+    mockAuctionIndex.getBidRequest = () => ({
+      mediaTypes: {
+        banner: {},
+        video: {
+          context: 'inbanner'
+        }
+      },
+      ortb2Imp: {}
+    });
+
+    addBidResponseHook(call, 'adcode', bid, reject, mockAuctionIndex);
+    sinon.assert.notCalled(reject);
+    sinon.assert.calledOnce(call);
+  });
+
+  it('should reject banner IBV bids on multi-format ad units when optional filter is enabled', () => {
+    const reject = sinon.stub();
+    const call = sinon.stub();
+    const bid = {
+      meta: {
+        advertiserDomains: ['validdomain1.com'],
+        primaryCatId: 'VALID_CAT',
+        attr: 6,
+        mediaType: 'banner',
+        cattax: 1
+      },
+      mediaType: 'banner'
+    };
+
+    mockAuctionIndex.getOrtb2 = () => ({
+      badv: [], bcat: []
+    });
+
+    mockAuctionIndex.getBidRequest = () => ({
+      mediaTypes: {
+        banner: {},
+        video: {
+          context: 'inbanner'
+        }
+      },
+      ortb2Imp: {}
+    });
+
+    config.setConfig({ [MODULE_NAME]: { mediaTypes: { rejectIbvBannerOnMultiFormat: true } } });
+
+    addBidResponseHook(call, 'adcode', bid, reject, mockAuctionIndex);
+    sinon.assert.calledWith(reject, BID_MEDIA_TYPE_REJECTION_REASON);
+    sinon.assert.notCalled(call);
   });
 })

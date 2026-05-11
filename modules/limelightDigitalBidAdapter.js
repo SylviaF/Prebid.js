@@ -87,7 +87,10 @@ export const spec = {
     { code: 'altstar' },
     { code: 'vaayaMedia' },
     { code: 'performist' },
-    { code: 'oveeo' }
+    { code: 'oveeo' },
+    { code: 'embimedia' },
+    { code: 'pgamrtb' },
+    { code: 'nuclion' }
   ],
   supportedMediaTypes: [BANNER, VIDEO],
 
