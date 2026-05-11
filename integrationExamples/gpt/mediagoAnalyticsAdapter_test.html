@@ -1,0 +1,805 @@
+<!--
+  Mediago Analytics Adapter Test Page
+  Used to test and verify that mediagoAnalyticsAdapter correctly sends analytics data
+  This page creates ad units, runs auctions, and displays the analytics data being sent
+-->
+<html>
+
+<head>
+    <meta charset="UTF-8">
+    <title>Mediago Analytics Adapter Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 20px;
+            max-width: 1400px;
+            margin: 0 auto;
+            background: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            border-bottom: 3px solid #4CAF50;
+            padding-bottom: 10px;
+        }
+        h2 {
+            color: #555;
+            margin-top: 30px;
+        }
+        .ad-container {
+            border: 2px solid #ddd;
+            margin: 20px 0;
+            padding: 15px;
+            background: #fafafa;
+            border-radius: 5px;
+        }
+        .ad-container h3 {
+            margin-top: 0;
+            color: #666;
+        }
+        .debug-info {
+            background: #e8f4f8;
+            padding: 15px;
+            margin: 15px 0;
+            border-radius: 5px;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            max-height: 400px;
+            overflow-y: auto;
+            border: 1px solid #b3d9e6;
+        }
+        .debug-info h4 {
+            margin-top: 0;
+            color: #2c5f7d;
+        }
+        .analytics-log {
+            background: #fff3cd;
+            padding: 15px;
+            margin: 15px 0;
+            border-radius: 5px;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            max-height: 500px;
+            overflow-y: auto;
+            border: 1px solid #ffc107;
+        }
+        .analytics-log h4 {
+            margin-top: 0;
+            color: #856404;
+        }
+        .analytics-event {
+            background: white;
+            padding: 10px;
+            margin: 10px 0;
+            border-left: 4px solid #4CAF50;
+            border-radius: 3px;
+        }
+        .analytics-event h5 {
+            margin: 0 0 10px 0;
+            color: #4CAF50;
+        }
+        button {
+            padding: 12px 24px;
+            margin: 10px 5px;
+            background: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: bold;
+        }
+        button:hover {
+            background: #45a049;
+        }
+        button.secondary {
+            background: #2196F3;
+        }
+        button.secondary:hover {
+            background: #0b7dda;
+        }
+        button.danger {
+            background: #f44336;
+        }
+        button.danger:hover {
+            background: #da190b;
+        }
+        .status {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 4px;
+            font-weight: bold;
+        }
+        .status.success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .status.info {
+            background: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+        }
+        .config-section {
+            background: #f8f9fa;
+            padding: 15px;
+            margin: 15px 0;
+            border-radius: 5px;
+            border: 1px solid #dee2e6;
+        }
+        .config-section label {
+            display: block;
+            margin: 10px 0 5px 0;
+            font-weight: bold;
+            color: #495057;
+        }
+        .config-section input {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ced4da;
+            border-radius: 4px;
+            font-size: 14px;
+            box-sizing: border-box;
+        }
+        pre {
+            background: #f4f4f4;
+            padding: 10px;
+            border-radius: 4px;
+            overflow-x: auto;
+            margin: 10px 0;
+        }
+    </style>
+    <script async src="../../build/dev/prebid.js"></script>
+    <script>
+        var FAILSAFE_TIMEOUT = 5000;
+        var PREBID_TIMEOUT = 3000;
+
+        // Analytics endpoint - change this to your actual endpoint
+        var ANALYTICS_ENDPOINT = 'https://your-analytics-endpoint.com/collect';
+        // Or use default endpoint
+        // var ANALYTICS_ENDPOINT = null; // Will use default MediagoAnalyticsEP
+
+        // Store analytics requests
+        var analyticsRequests = [];
+
+        // Intercept fetch requests to capture analytics data
+        var originalFetch = window.fetch;
+        window.fetch = function(url, options) {
+            if (typeof url === 'string' && (
+                url.includes('mediago') || 
+                url.includes('analytics') ||
+                (ANALYTICS_ENDPOINT && url.includes(ANALYTICS_ENDPOINT))
+            )) {
+                try {
+                    var requestData = null;
+                    if (options && options.body) {
+                        requestData = JSON.parse(options.body);
+                    }
+                    analyticsRequests.push({
+                        url: url,
+                        method: options ? options.method || 'GET' : 'GET',
+                        data: requestData,
+                        timestamp: new Date().toISOString(),
+                        headers: options ? options.headers : {}
+                    });
+                    console.log('Analytics Request Captured:', {
+                        url: url,
+                        method: options ? options.method : 'GET',
+                        data: requestData
+                    });
+                    updateAnalyticsLog(analyticsRequests);
+                } catch (e) {
+                    console.error('Failed to parse analytics request:', e);
+                }
+            }
+            return originalFetch.apply(this, arguments);
+        };
+
+        // Also intercept XMLHttpRequest for older implementations
+        var originalXHROpen = XMLHttpRequest.prototype.open;
+        var originalXHRSend = XMLHttpRequest.prototype.send;
+
+        XMLHttpRequest.prototype.open = function(method, url, ...args) {
+            this._url = url;
+            this._method = method;
+            return originalXHROpen.apply(this, [method, url, ...args]);
+        };
+
+        XMLHttpRequest.prototype.send = function(data) {
+            var url = this._url;
+            if (url && (
+                url.includes('mediago') || 
+                url.includes('analytics') ||
+                (ANALYTICS_ENDPOINT && url.includes(ANALYTICS_ENDPOINT))
+            )) {
+                try {
+                    var requestData = null;
+                    if (data) {
+                        requestData = JSON.parse(data);
+                    }
+                    analyticsRequests.push({
+                        url: url,
+                        method: this._method,
+                        data: requestData,
+                        timestamp: new Date().toISOString()
+                    });
+                    console.log('Analytics Request Captured (XHR):', {
+                        url: url,
+                        method: this._method,
+                        data: requestData
+                    });
+                    updateAnalyticsLog(analyticsRequests);
+                } catch (e) {
+                    console.error('Failed to parse analytics request:', e);
+                }
+            }
+            return originalXHRSend.apply(this, [data]);
+        };
+
+        function updateAnalyticsLog(requests) {
+            var logDiv = document.getElementById('analytics-log');
+            if (!logDiv) return;
+
+            var html = '<h4>Analytics Requests (' + requests.length + ')</h4>';
+            
+            if (requests.length === 0) {
+                html += '<p>No analytics requests captured yet. Run an auction to see analytics data.</p>';
+            } else {
+                requests.forEach(function(req, index) {
+                    html += '<div class="analytics-event">';
+                    html += '<h5>Request #' + (index + 1) + ' - ' + req.method + ' ' + new Date(req.timestamp).toLocaleTimeString() + '</h5>';
+                    html += '<p><strong>URL:</strong> <code>' + req.url + '</code></p>';
+                    if (req.data) {
+                        html += '<p><strong>Data:</strong></p>';
+                        html += '<pre>' + JSON.stringify(req.data, null, 2) + '</pre>';
+                        
+                        // Show event details
+                        if (Array.isArray(req.data)) {
+                            req.data.forEach(function(event, eventIndex) {
+                                html += '<div style="margin: 10px 0; padding: 10px; background: #f0f0f0; border-radius: 3px;">';
+                                html += '<strong>Event ' + (eventIndex + 1) + ':</strong> ';
+                                html += '<span style="color: #4CAF50; font-weight: bold;">' + (event.evt || event.eventType || 'unknown') + '</span><br>';
+                                if (event.logType) html += 'logType: ' + event.logType + '<br>';
+                                if (event.from) html += 'from: ' + event.from + '<br>';
+                                if (event.ua) html += 'ua: ' + event.ua.substring(0, 50) + '...<br>';
+                                if (event.auctionElapseTime !== undefined) html += 'auctionElapseTime: ' + event.auctionElapseTime + 'ms<br>';
+                                if (event.finalWonBid) {
+                                    html += 'finalWonBid: <br>';
+                                    html += '<pre style="margin: 5px 0; padding: 5px; background: white;">' + 
+                                        JSON.stringify(event.finalWonBid, null, 2) + '</pre>';
+                                }
+                                html += '</div>';
+                            });
+                        }
+                    }
+                    html += '</div>';
+                });
+            }
+            
+            logDiv.innerHTML = html;
+        }
+
+        // Helper function to generate random CPM between min and max
+        function getRandomCPM(min, max) {
+            return Math.round((Math.random() * (max - min) + min) * 100) / 100;
+        }
+
+        // Create ad units with multiple testBidder bids for testing
+        // CPM values will be randomly generated on each auction
+        function createAdUnits() {
+            return [
+                {
+                    code: 'mediago-analytics-ad-1',
+                    mediaTypes: {
+                        banner: {
+                            sizes: [[300, 250]]
+                        }
+                    },
+                    bids: [
+                        {
+                            bidder: 'testBidder',
+                            params: {
+                                bidderId: 'testBidder1',
+                                cpm: getRandomCPM(0, 3.0)
+                            }
+                        },
+                        {
+                            bidder: 'testBidder',
+                            params: {
+                                bidderId: 'testBidder2',
+                                cpm: getRandomCPM(0, 3.0)
+                            }
+                        },
+                        {
+                            bidder: 'testBidder',
+                            params: {
+                                bidderId: 'testBidder3',
+                                cpm: getRandomCPM(0, 3.0)
+                            }
+                        }
+                    ]
+                },
+                {
+                    code: 'mediago-analytics-ad-2',
+                    mediaTypes: {
+                        banner: {
+                            sizes: [[728, 90]]
+                        }
+                    },
+                    bids: [
+                        {
+                            bidder: 'testBidder',
+                            params: {
+                                bidderId: 'testBidder1',
+                                cpm: getRandomCPM(0, 3.0)
+                            }
+                        },
+                        {
+                            bidder: 'testBidder',
+                            params: {
+                                bidderId: 'testBidder2',
+                                cpm: getRandomCPM(0, 3.0)
+                            }
+                        }
+                    ]
+                }
+            ];
+        }
+
+        var adUnits = createAdUnits();
+
+        var pbjs = pbjs || {};
+        pbjs.que = pbjs.que || [];
+
+    </script>
+</head>
+
+<body>
+    <div class="container">
+        <h1>Mediago Analytics Adapter Test Page</h1>
+        <p>This page tests the <code>mediagoAnalyticsAdapter</code> integration with Prebid.js.</p>
+        <p>It will capture and display all analytics data sent to the analytics endpoint.</p>
+
+        <div class="status info">
+            <strong>Instructions:</strong>
+            <ol>
+                <li>Configure the analytics settings below (or use defaults)</li>
+                <li>Click "Initialize Prebid & Analytics" to set up Prebid.js</li>
+                <li>Click "Run Auction" to start a test auction with multiple testBidder bids</li>
+                <li>View the analytics data in the "Analytics Requests" section below</li>
+                <li>Check the browser console for detailed logs</li>
+            </ol>
+            <p style="margin-top: 10px; padding: 10px; background: #e7f3ff; border-left: 4px solid #2196F3; border-radius: 4px;">
+                <strong>Note:</strong> This test uses multiple testBidder bids per ad unit to simulate a real auction scenario with multiple bidders competing. Ad Unit 1 has 3 bids, Ad Unit 2 has 2 bids.
+            </p>
+        </div>
+
+        <div class="config-section">
+            <h3>Mediago Analytics Configuration</h3>
+            <label for="analytics-endpoint">Endpoint URL:</label>
+            <input type="text" id="analytics-endpoint" placeholder="Leave empty to use default endpoint" 
+                   value="" style="font-family: monospace;">
+            <p style="font-size: 12px; color: #666; margin-top: 5px;">
+                Leave empty to use the default MediagoAnalyticsEP endpoint, or enter a custom endpoint URL.
+            </p>
+            
+            <label for="analytics-method" style="margin-top: 15px;">HTTP Method:</label>
+            <select id="analytics-method" style="width: 100%; padding: 8px; border: 1px solid #ced4da; border-radius: 4px; font-size: 14px; box-sizing: border-box;">
+                <option value="POST">POST</option>
+                <option value="GET">GET</option>
+            </select>
+            
+            <label for="analytics-batch-size" style="margin-top: 15px;">Batch Size:</label>
+            <input type="number" id="analytics-batch-size" placeholder="10" value="10" min="1" 
+                   style="font-family: monospace;">
+            <p style="font-size: 12px; color: #666; margin-top: 5px;">
+                Number of events to collect before sending (default: 1).
+            </p>
+            
+            <label for="analytics-batch-delay" style="margin-top: 15px;">Batch Delay (ms):</label>
+            <input type="number" id="analytics-batch-delay" placeholder="10000" value="10000" min="0" 
+                   style="font-family: monospace;">
+            <p style="font-size: 12px; color: #666; margin-top: 5px;">
+                Delay in milliseconds before sending incomplete batch (default: 100).
+            </p>
+            
+            <label for="analytics-gvlid" style="margin-top: 15px;">GVLID:</label>
+            <input type="number" id="analytics-gvlid" placeholder="1020" value="1020" min="0" 
+                   style="font-family: monospace;">
+            <p style="font-size: 12px; color: #666; margin-top: 5px;">
+                Global Vendor List ID for GDPR compliance (default: 1020).
+            </p>
+        </div>
+
+        <div>
+            <button onclick="initializePrebid()">Initialize Prebid & Analytics</button>
+            <button onclick="runAuction()" class="secondary">Run Auction</button>
+            <button onclick="clearLogs()" class="danger">Clear Logs</button>
+        </div>
+
+        <div id="status-message"></div>
+    </div>
+
+    <div class="container">
+        <h2>Analytics Requests</h2>
+        <div class="analytics-log" id="analytics-log">
+            <h4>Waiting for analytics requests...</h4>
+            <p>Click "Initialize Prebid & Analytics" and then "Run Auction" to see analytics data.</p>
+        </div>
+    </div>
+
+    <div class="container">
+        <h2>Debug Information</h2>
+        <div class="debug-info" id="debug-info">
+            <h4>Waiting for auction...</h4>
+            <p>Debug information will appear here after running an auction.</p>
+        </div>
+    </div>
+
+    <div class="ad-container">
+        <h3>Ad Unit 1 (300x250)</h3>
+        <div id="mediago-analytics-ad-1" style="width: 300px; height: 250px; background: #f0f0f0; border: 1px dashed #999; display: flex; align-items: center; justify-content: center;">
+            <p>Ad Unit 1</p>
+        </div>
+    </div>
+
+    <div class="ad-container">
+        <h3>Ad Unit 2 (728x90)</h3>
+        <div id="mediago-analytics-ad-2" style="width: 728px; height: 90px; background: #f0f0f0; border: 1px dashed #999; display: flex; align-items: center; justify-content: center;">
+            <p>Ad Unit 2</p>
+        </div>
+    </div>
+
+    <script>
+        var prebidInitialized = false;
+        var adUnitsAdded = false;
+
+        function showStatus(message, type) {
+            var statusDiv = document.getElementById('status-message');
+            if (statusDiv) {
+                statusDiv.className = 'status ' + (type || 'info');
+                statusDiv.innerHTML = message;
+            }
+        }
+
+        function initializePrebid() {
+            // Get configuration from input fields
+            var endpointInput = document.getElementById('analytics-endpoint');
+            var methodInput = document.getElementById('analytics-method');
+            var batchSizeInput = document.getElementById('analytics-batch-size');
+            var batchDelayInput = document.getElementById('analytics-batch-delay');
+            var gvlidInput = document.getElementById('analytics-gvlid');
+
+            var endpoint = endpointInput.value.trim() || null;
+            var method = methodInput ? methodInput.value : 'POST';
+            var batchSize = batchSizeInput ? parseInt(batchSizeInput.value) || 1 : 1;
+            var batchDelay = batchDelayInput ? parseInt(batchDelayInput.value) || 100 : 100;
+            var gvlid = gvlidInput ? parseInt(gvlidInput.value) || 1020 : 1020;
+
+            showStatus('Initializing Prebid.js and Mediago Analytics Adapter...', 'info');
+
+            pbjs.que.push(function() {
+                console.log('Initializing Prebid.js with testBidder...');
+
+                // Register test bidder
+                pbjs.registerBidAdapter(null, 'testBidder', {
+                    supportedMediaTypes: ['banner', 'video', 'native'],
+                    isBidRequestValid: () => true
+                });
+
+                // Configure bidderSettings to allow alternate bidder codes for testBidder
+                pbjs.setConfig({
+                    bidderSettings: {
+                        testBidder: {
+                            allowAlternateBidderCodes: true,
+                            allowedAlternateBidderCodes: ['*'] // Allow any bidder code
+                        }
+                    }
+                });
+
+                // Configure debugging to intercept bid responses with random CPM for each testBidder
+                // CPM will be read from the bid request params
+                pbjs.setConfig({
+                    debugging: {
+                        enabled: true,
+                        intercept: [
+                            {
+                                when: {
+                                    bidder: 'testBidder',
+                                    params: { bidderId: 'testBidder1' }
+                                },
+                                then: function(bidRequest) {
+                                    // Get CPM from bid request params, or use random if not available
+                                    var cpm = bidRequest.params && bidRequest.params.cpm ? bidRequest.params.cpm : getRandomCPM(1.0, 3.0);
+                                    
+                                    // Get size from bid request
+                                    var width = 300;
+                                    var height = 250;
+                                    if (bidRequest.mediaTypes && bidRequest.mediaTypes.banner && bidRequest.mediaTypes.banner.sizes) {
+                                        var sizes = bidRequest.mediaTypes.banner.sizes;
+                                        if (Array.isArray(sizes) && sizes.length > 0) {
+                                            // Get first size from array
+                                            var firstSize = Array.isArray(sizes[0]) ? sizes[0] : sizes;
+                                            width = firstSize[0] || width;
+                                            height = firstSize[1] || height;
+                                        }
+                                    } else if (bidRequest.sizes) {
+                                        // Fallback to deprecated sizes field
+                                        var sizes = Array.isArray(bidRequest.sizes[0]) ? bidRequest.sizes[0] : bidRequest.sizes;
+                                        width = sizes[0] || width;
+                                        height = sizes[1] || height;
+                                    }
+                                    
+                                    return {
+                                        creativeId: 'testCreativeId1',
+                                        ad: '<div style="width: ' + width + 'px; height: ' + height + 'px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); display: flex; align-items: center; justify-content: center; color: white; font-size: 24px; font-weight: bold;">Test Bidder 1<br>CPM: $' + cpm.toFixed(2) + '<br>' + width + 'x' + height + '</div>',
+                                        cpm: cpm,
+                                        currency: 'USD',
+                                        bidderCode: 'testBidder',
+                                        width: width,
+                                        height: height
+                                    };
+                                }
+                            },
+                            {
+                                when: {
+                                    bidder: 'testBidder',
+                                    params: { bidderId: 'testBidder2' }
+                                },
+                                then: function(bidRequest) {
+                                    var cpm = bidRequest.params && bidRequest.params.cpm ? bidRequest.params.cpm : getRandomCPM(1.5, 3.5);
+                                    
+                                    // Get size from bid request
+                                    var width = 300;
+                                    var height = 250;
+                                    if (bidRequest.mediaTypes && bidRequest.mediaTypes.banner && bidRequest.mediaTypes.banner.sizes) {
+                                        var sizes = bidRequest.mediaTypes.banner.sizes;
+                                        if (Array.isArray(sizes) && sizes.length > 0) {
+                                            var firstSize = Array.isArray(sizes[0]) ? sizes[0] : sizes;
+                                            width = firstSize[0] || width;
+                                            height = firstSize[1] || height;
+                                        }
+                                    } else if (bidRequest.sizes) {
+                                        var sizes = Array.isArray(bidRequest.sizes[0]) ? bidRequest.sizes[0] : bidRequest.sizes;
+                                        width = sizes[0] || width;
+                                        height = sizes[1] || height;
+                                    }
+                                    
+                                    return {
+                                        creativeId: 'testCreativeId2',
+                                        ad: '<div style="width: ' + width + 'px; height: ' + height + 'px; background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); display: flex; align-items: center; justify-content: center; color: white; font-size: 24px; font-weight: bold;">Test Bidder 2<br>CPM: $' + cpm.toFixed(2) + '<br>' + width + 'x' + height + '</div>',
+                                        cpm: cpm,
+                                        currency: 'USD',
+                                        bidderCode: 'testBidder',
+                                        width: width,
+                                        height: height
+                                    };
+                                }
+                            },
+                            {
+                                when: {
+                                    bidder: 'testBidder',
+                                    params: { bidderId: 'testBidder3' }
+                                },
+                                then: function(bidRequest) {
+                                    var cpm = bidRequest.params && bidRequest.params.cpm ? bidRequest.params.cpm : getRandomCPM(0.8, 2.5);
+                                    
+                                    // Get size from bid request
+                                    var width = 300;
+                                    var height = 250;
+                                    if (bidRequest.mediaTypes && bidRequest.mediaTypes.banner && bidRequest.mediaTypes.banner.sizes) {
+                                        var sizes = bidRequest.mediaTypes.banner.sizes;
+                                        if (Array.isArray(sizes) && sizes.length > 0) {
+                                            var firstSize = Array.isArray(sizes[0]) ? sizes[0] : sizes;
+                                            width = firstSize[0] || width;
+                                            height = firstSize[1] || height;
+                                        }
+                                    } else if (bidRequest.sizes) {
+                                        var sizes = Array.isArray(bidRequest.sizes[0]) ? bidRequest.sizes[0] : bidRequest.sizes;
+                                        width = sizes[0] || width;
+                                        height = sizes[1] || height;
+                                    }
+                                    
+                                    return {
+                                        creativeId: 'testCreativeId3',
+                                        ad: '<div style="width: ' + width + 'px; height: ' + height + 'px; background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); display: flex; align-items: center; justify-content: center; color: white; font-size: 24px; font-weight: bold;">Test Bidder 3<br>CPM: $' + cpm.toFixed(2) + '<br>' + width + 'x' + height + '</div>',
+                                        cpm: cpm,
+                                        currency: 'USD',
+                                        bidderCode: 'testBidder',
+                                        width: width,
+                                        height: height
+                                    };
+                                }
+                            },
+                            {
+                                // Fallback for testBidder without specific params
+                                when: {
+                                    bidder: 'testBidder'
+                                },
+                                then: function(bidRequest) {
+                                    var cpm = bidRequest.params && bidRequest.params.cpm ? bidRequest.params.cpm : getRandomCPM(1.0, 3.0);
+                                    
+                                    // Get size from bid request
+                                    var width = 300;
+                                    var height = 250;
+                                    if (bidRequest.mediaTypes && bidRequest.mediaTypes.banner && bidRequest.mediaTypes.banner.sizes) {
+                                        var sizes = bidRequest.mediaTypes.banner.sizes;
+                                        if (Array.isArray(sizes) && sizes.length > 0) {
+                                            var firstSize = Array.isArray(sizes[0]) ? sizes[0] : sizes;
+                                            width = firstSize[0] || width;
+                                            height = firstSize[1] || height;
+                                        }
+                                    } else if (bidRequest.sizes) {
+                                        var sizes = Array.isArray(bidRequest.sizes[0]) ? bidRequest.sizes[0] : bidRequest.sizes;
+                                        width = sizes[0] || width;
+                                        height = sizes[1] || height;
+                                    }
+                                    
+                                    return {
+                                        creativeId: 'testCreativeId',
+                                        ad: '<div style="width: ' + width + 'px; height: ' + height + 'px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); display: flex; align-items: center; justify-content: center; color: white; font-size: 24px; font-weight: bold;">Test Ad<br>CPM: $' + cpm.toFixed(2) + '<br>' + width + 'x' + height + '</div>',
+                                        cpm: cpm,
+                                        currency: 'USD',
+                                        bidderCode: 'testBidder',
+                                        width: width,
+                                        height: height
+                                    };
+                                }
+                            }
+                        ]
+                    }
+                });
+
+                // Add ad units (regenerate with new random CPMs each time)
+                var currentAdUnits = createAdUnits();
+                console.log('Adding ad units with random CPMs:', currentAdUnits);
+                pbjs.addAdUnits(currentAdUnits);
+                adUnitsAdded = true;
+
+                // Enable Mediago Analytics Adapter with configuration from inputs
+                var analyticsConfig = {
+                    provider: 'mediago',
+                    options: {
+                        method: method,
+                        batchSize: batchSize,
+                        batchDelay: batchDelay,
+                        gvlid: gvlid
+                    }
+                };
+
+                if (endpoint) {
+                    analyticsConfig.options.endpoint = endpoint;
+                    console.log('Using custom analytics endpoint:', endpoint);
+                } else {
+                    console.log('Using default analytics endpoint');
+                }
+
+                console.log('Mediago Analytics Config:', analyticsConfig);
+
+                pbjs.enableAnalytics(analyticsConfig);
+                console.log('Mediago Analytics Adapter enabled:', analyticsConfig);
+
+                prebidInitialized = true;
+                showStatus('✓ Prebid.js and Mediago Analytics Adapter initialized successfully!', 'success');
+            });
+        }
+
+        function runAuction() {
+            if (!prebidInitialized) {
+                showStatus('Please initialize Prebid first by clicking "Initialize Prebid & Analytics"', 'info');
+                return;
+            }
+
+            showStatus('Running auction...', 'info');
+            console.log('Starting auction with testBidder...');
+
+            pbjs.que.push(function() {
+                var adUnitCodes = ['mediago-analytics-ad-1', 'mediago-analytics-ad-2'];
+
+                pbjs.requestBids({
+                    adUnitCodes: adUnitCodes,
+                    bidsBackHandler: function(bids, timedOut, auctionId) {
+                        console.log('Auction completed:', {bids, timedOut, auctionId});
+                        
+                        var debugDiv = document.getElementById('debug-info');
+                        if (debugDiv) {
+                            var html = '<h4>Auction Results</h4>';
+                            html += '<p><strong>Auction ID:</strong> ' + (auctionId || 'N/A') + '</p>';
+                            html += '<p><strong>Timed Out:</strong> ' + (timedOut ? 'Yes' : 'No') + '</p>';
+                            html += '<p><strong>Bid Responses:</strong> ' + (bids ? Object.keys(bids).length : 0) + '</p>';
+                            
+                            if (bids) {
+                                html += '<h5>Bid Details:</h5>';
+                                html += '<pre>' + JSON.stringify(bids, null, 2) + '</pre>';
+                            }
+                            
+                            debugDiv.innerHTML = html;
+                        }
+
+                        // Wait a bit for analytics to be sent
+                        setTimeout(function() {
+                            renderAds();
+                            showStatus('✓ Auction completed! Check the Analytics Requests section above to see the data sent.', 'success');
+                        }, 200);
+                    },
+                    timeout: PREBID_TIMEOUT
+                });
+            });
+        }
+
+        function renderAds() {
+            console.log('Rendering ads...');
+            
+            var winners = pbjs.getHighestCpmBids();
+            console.log('Winning bids:', winners);
+            
+            if (!winners || winners.length === 0) {
+                console.log('No winning bids to render');
+                return;
+            }
+            
+            winners.forEach(function(winningBid) {
+                if (winningBid && winningBid.adId) {
+                    renderOne(winningBid);
+                }
+            });
+        }
+
+        function renderOne(winningBid) {
+            var adUnitCode = winningBid.adUnitCode;
+            var div = document.getElementById(adUnitCode);
+            
+            console.log('Rendering ad for:', adUnitCode, 'adId:', winningBid.adId);
+            
+            if (div) {
+                div.innerHTML = '';
+                
+                var iframe = document.createElement('iframe');
+                iframe.frameBorder = '0';
+                iframe.scrolling = 'no';
+                iframe.style.width = '100%';
+                iframe.style.height = '100%';
+                iframe.style.border = 'none';
+                div.appendChild(iframe);
+                
+                try {
+                    var iframeDoc = iframe.contentWindow.document;
+                    if (iframeDoc.documentElement) {
+                        iframeDoc.documentElement.style.margin = '0';
+                        iframeDoc.documentElement.style.padding = '0';
+                    }
+                    if (iframeDoc.body) {
+                        iframeDoc.body.style.margin = '0';
+                        iframeDoc.body.style.padding = '0';
+                    }
+                    pbjs.renderAd(iframeDoc, winningBid.adId);
+                    console.log('Successfully rendered ad for:', adUnitCode);
+                } catch (e) {
+                    console.error('Failed to render ad for', adUnitCode, ':', e);
+                    div.innerHTML = '<p style="color: red;">Failed to render ad: ' + e.message + '</p>';
+                }
+            }
+        }
+
+        function clearLogs() {
+            analyticsRequests = [];
+            updateAnalyticsLog(analyticsRequests);
+            document.getElementById('debug-info').innerHTML = '<h4>Debug info cleared</h4>';
+            showStatus('Logs cleared', 'info');
+        }
+
+        // Auto-initialize on page load (optional)
+        window.addEventListener('load', function() {
+            console.log('Page loaded. Ready to initialize Prebid.');
+            showStatus('Page loaded. Click "Initialize Prebid & Analytics" to begin.', 'info');
+        });
+    </script>
+</body>
+
+</html>
